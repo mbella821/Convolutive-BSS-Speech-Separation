@@ -1,0 +1,68 @@
+function S = compute_stft(x, window, h, nfft)
+% COMPUTE_STFT Short-Time Fourier Transform.
+%   S = compute_stft(x, window, noverlap, nfft) computes the STFT of the
+%   real-valued signal x using the specified window, overlap and FFT size.
+%
+%   Input:
+%     x        - input signal (column vector)
+%     window   - analysis window (column vector)
+%     noverlap - number of samples overlapping between consecutive frames
+%     nfft     - FFT length
+%   Output:
+%     S        - nfft x T complex STFT matrix (T = number of time frames)
+%
+%   The implementation follows the standard overlap-add framework used in
+%   the original method.
+
+
+%% stft_vm.m
+function stft = stft_vm(x, window, h, nfft)
+% STFT_VM Short-Time Fourier Transform computation.
+%
+% INPUTS:
+%   x       : Input 1D signal vector
+%   window  : Weighting analysis window (e.g., hanning)
+%   h       : Overlap step size (STFT hop size)
+%   nfft    : Number of FFT points for frequency analysis
+%
+% OUTPUT:
+%   stft    : Complex-valued STFT spectrogram matrix
+
+    % Round fractional step sizes (e.g., 2560.5) to avoid indexing errors
+    h = round(h);
+    
+    % Calculate dimensions of target STFT matrix
+    rown = ceil((1 + nfft) / 2);             
+    coln = 1 + fix((length(x) - length(window)) / h);  
+    stft = zeros(rown, coln);               
+    
+    j = 1;
+    % Slide window across signal and compute spectrums
+    for i = 1:h:(length(x) - length(window))
+        aux = fft(x(i : i + length(window) - 1) .* window, nfft);
+        stft(:, j) = aux(1 : rown);
+        j = j + 1;
+    end
+end
+
+x = x(:);
+window = window(:);
+win_len = length(window);
+hop = win_len - noverlap;
+sig_len = length(x);
+
+% Number of complete frames
+num_frames = floor((sig_len - noverlap) / hop);
+
+% Pre-allocate STFT matrix
+S = zeros(nfft, num_frames);
+
+for n = 1:num_frames
+    idx = (n-1)*hop + (1:win_len);
+    if idx(end) > sig_len
+        break;
+    end
+    frame = x(idx) .* window;
+    S(:, n) = fft(frame, nfft);
+end
+end

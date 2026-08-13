@@ -1,44 +1,56 @@
-%% MAIN Main script for Blind Source Separation via RTF-based Recombination.
-%   This script demonstrates the complete pipeline of the proposed method
-%   for both determined and underdetermined convolutive mixtures.
+%% MAIN Main script for "Underdetermined Convolutive Blind Source Separation
+%  of Speech Signals Using Relaxed Time-Frequency Sparsity and
+%  RTF-Based Recombination.
 %
-%   The method consists of four steps:
-%     1. STFT analysis of the microphone signals.
-%     2. Complex cosine similarity feature extraction and EM clustering
-%        to estimate probabilistic TF masks.
-%     3. Permutation alignment across frequency bins.
-%     4. Blind RTF estimation and source recombination.
+%  This script demonstrates the complete processing pipeline of the
+%  proposed method for both determined and underdetermined convolutive
+%  mixtures.
 %
-%   Author: Mostafa Bella.
-%   Date: 2024
+%  The processing pipeline consists of the following steps:
+%    1. STFT analysis of the microphone signals.
+%    2. Complex cosine similarity feature extraction followed by
+%       EM-based clustering to estimate probabilistic time-frequency
+%       masks.
+%    3. Permutation alignment across frequency bins.
+%    4. Blind RTF estimation and source recombination.
+%
+%  Author: Mostafa Bella.
 
 clear; clc; close all;
-addpath(genpath('/home/mostafa/Mostafa/sawada/CTFMR version finale/src'))
-addpath(genpath('/home/mostafa/Mostafa/sawada/CTFMR version finale/utils'))
-addpath(genpath('/home/mostafa/Mostafa/sawada'))
+
+%% Add project directories to MATLAB path
+project_root = fileparts(mfilename('fullpath'));
+
+addpath(genpath(fullfile(project_root, 'src')));
+addpath(genpath(fullfile(project_root, 'utils')));
+
+data_dir = fullfile(project_root, 'data');
 
 %% ========================================================================
-% 1. PARAMETERS (exactly as original)
+% 1. PARAMETERS
 %% ========================================================================
+
 params.window_size   = 1024*2;      % STFT window length
 params.nfft          = 1024*2;      % FFT size
-params.overlap       = 0.25 * params.window_size; % overlap in samples
-params.num_sources   = 2;           % Number of sources N (2 or 3)
-params.num_mics      = 2;           % Number of microphones M (must be 2)
-params.signal_length = 160000;      % Signal length in samples
+params.overlap       = 0.25 * params.window_size; % Overlap in samples
+params.num_sources   = 3;            % Number of sources (2 or 3)
+params.num_mics      = 2;            % Number of microphones (must be 2)
+params.signal_length = 160000;       % Signal length in samples
 
 % Number of positive-frequency bins (DC to Nyquist)
 params.num_freq_bins = floor(params.nfft/2) + 1;
 
 % EM clustering parameters
-params.max_iter_em   = 100;
-params.tol_em        = 1e-7;
+params.max_iter_em   = 100;          % Maximum number of EM iterations
+params.tol_em        = 1e-7;         % EM convergence tolerance
 
 % Permutation alignment parameters
-params.max_iter_perm = 50;
-params.tol_perm      = 1e-10;
+params.max_iter_perm = 50;           % Maximum number of permutation iterations
+params.tol_perm      = 1e-10;        % Permutation convergence tolerance
 
-% Reconstruction threshold (determined: >1 always false, underdetermined: 0.65)
+% Reconstruction threshold:
+%   - Determined case (2 sources): 1.0
+%   - Underdetermined case (3 sources): 0.65
 if params.num_sources == 2
     params.mask_threshold = 1.0;
 else
@@ -46,104 +58,69 @@ else
 end
 
 %% ========================================================================
-% 2. HARD-CODED REFERENCE VECTORS (exactly as original)
+% 2. REFERENCE VECTORS
 %% ========================================================================
-% These are the exact reference vectors used in the original code.
-% For N=2: Ref3 and Ref6 are used.
-% For N=3: Ref3 and Ref4 are used.
 
-Ref1 = 1*ones(2,1)*1 + 1*1i;
-Ref2 = [0.3245 + 0.4221*1i; 0.2498 + 0.2067*1i];
-Ref3 = [1; -3];
-Ref4 = [3 + 3*1i; 1 + 1*1i];
-Ref5 = [1 - 2*1i; 0.5 + 2*1i];
-Ref6 = [3; 1];
+fprintf('Reference vectors...\n');
 
-if params.num_sources == 2
-    H_ref = [Ref3, Ref6];  % exact original for 2 sources
-elseif params.num_sources == 3
-    H_ref = [Ref3, Ref4];  % exact original for 3 sources
+% Reference vectors used for complex cosine similarity.
+% If no reference vectors are provided, M orthogonal complex vectors
+% are generated automatically.
+params.reference_vectors = [];
+
+if isempty(params.reference_vectors)
+
+    % Generate M orthogonal complex reference vectors (L = M).
+    L = params.num_mics;
+    H_ref = (randn(params.num_mics, L) + 1i*randn(params.num_mics, L)) / sqrt(2);
+    [H_ref, ~] = qr(H_ref);
+    H_ref = H_ref(:, 1:L);
+
 else
-    error('Only N=2 or N=3 are supported in this demo.');
+
+    H_ref = params.reference_vectors;
+
 end
 
-% 
-% % Reference vectors for complex cosine similarity (optional)
-% % If empty, M orthogonal complex vectors are generated automatically.
-% Ref(:,1)=[3 ;
-%    1 ];
-% 
-% Ref(:,2)=[1;
-%   -3];
-% params.reference_vectors = Ref;
-
 %% ========================================================================
-% 2. LOAD AUDIO AND MIXING FILTERS
+% 3. LOAD AUDIO MIXTURES
 %% ========================================================================
-% NOTE: Adapt the file paths below to your local dataset.
-%
-% Example for N=2 sources:
-%   [s1, FS] = audioread('male_s4.wav');
-%   [s2, FS] = audioread('female_s5.wav');
-%   a = load('filters/2src_50ms_1m_1m_config2.mat');
-%
-% Example for N=3 sources:
-%   [s1, FS] = audioread('s2.wav');
-%   [s2, FS] = audioread('s4.wav');
-%   [s3, FS] = audioread('male_s2.wav');
-%   a = load('filters/3src_100ms_1m_1m_config2.mat');
 
-fprintf('Loading audio signals and mixing filters...\n');
+% Load the appropriate mixture depending on the number of sources.
+% The input files should be adapted to the local dataset if necessary.
+fprintf('Loading audio mixtures...\n');
 
 % -------------------------------------------------------------------------
-% USER CONFIGURATION: replace with your actual file paths
+% USER CONFIGURATION:
+% Replace the file paths below with the paths to the desired mixtures.
 % -------------------------------------------------------------------------
+
 if params.num_sources == 2
-    [s1, FS] = audioread('/home/mostafa/Mostafa/sawada/male_s4.wav');
-    [s2, FS] = audioread('/home/mostafa/Mostafa/sawada/female_s5.wav');
-    s1 = s1(1:params.signal_length);
-    s2 = s2(1:params.signal_length);
-    sources = [s1, s2];
 
-    a = load('/home/mostafa/Mostafa/sawada/filters/2src_50ms_1m_1m_config2.mat');
+    % Determined mixture: 2 sources and 2 microphones.
+    [x1, FS] = audioread('deter_mix_mic1.wav');
+    [x2, ~]  = audioread('deter_mix_mic2.wav');
+    x = [x1, x2];
+
 elseif params.num_sources == 3
-    [s1, FS] = audioread('s2.wav');
-    [s2, FS] = audioread('s4.wav');
-    [s3, FS] = audioread('male_s2.wav');
-    s1 = s1(1:params.signal_length);
-    s2 = s2(1:params.signal_length);
-    s3 = s3(1:params.signal_length);
-    sources = [s1, s2, s3];
 
-    a = load('/home/mostafa/Mostafa/sawada/filters/3src_100ms_1m_1m_config2.mat');
+    % Underdetermined mixture: 3 sources and 2 microphones.
+    [x1, ~] = audioread('under_mix_mic1.wav');
+    [x2, ~] = audioread('under_mix_mic2.wav');
+    x = [x1, x2];
+
 else
+
     error('This demo supports N=2 or N=3 sources. Please adapt main.m for other cases.');
-end
 
-% Extract mixing filters
-A = a.A; % M x N x filter_length
-b = cell(params.num_mics, params.num_sources);
-for i = 1:params.num_mics
-    for j = 1:params.num_sources
-        b{i,j} = squeeze(A(i,j,:));
-    end
 end
 
 %% ========================================================================
-% 3. GENERATE CONVOLUTIVE MIXTURES
+% 4. STFT ANALYSIS
 %% ========================================================================
-fprintf('Generating convolutive mixtures...\n');
-x = zeros(params.signal_length, params.num_mics);
-for i = 1:params.num_mics
-    for j = 1:params.num_sources
-        x(:, i) = x(:, i) + fftfilt(b{i,j}, sources(:, j));
-    end
-end
 
-%% ========================================================================
-% 5. STFT ANALYSIS (positive frequencies only)
-%% ========================================================================
 fprintf('Computing one-sided STFT...\n');
+
 window = hanning(params.window_size);
 params.window = window;
 
@@ -151,96 +128,123 @@ F_pos = params.num_freq_bins;
 X_tf = zeros(params.num_mics, [], F_pos);
 
 for i = 1:params.num_mics
+
     S = compute_stft(x(:, i), window, params.overlap, params.nfft);
+
     if i == 1
         T = size(S, 2);
         X_tf = zeros(params.num_mics, T, F_pos);
     end
-    X_tf(i, :, :) = S'; % M x T x F_pos
+
+    X_tf(i, :, :) = S'; % Microphones x time frames x frequency bins
+
 end
 
 [~, T, F] = size(X_tf);
-fprintf('  STFT size: %d mics x %d frames x %d bins\n', params.num_mics, T, F);
+
+fprintf('  STFT size: %d mics x %d frames x %d bins\n', ...
+        params.num_mics, T, F);
 
 %% ========================================================================
-% 6. FEATURE EXTRACTION (Complex Cosine Similarity)
+% 5. FEATURE EXTRACTION: COMPLEX COSINE SIMILARITY
 %% ========================================================================
+
 fprintf('Extracting complex cosine similarity features...\n');
+
 theta = extract_complex_cosine_features(X_tf, H_ref);
 
 %% ========================================================================
-% 7. WHITENING AND NORMALIZATION
+% 6. WHITENING AND NORMALIZATION
 %% ========================================================================
+
 fprintf('Whitening features...\n');
+
 z = whiten_features(theta);
 
 %% ========================================================================
-% 8. EM CLUSTERING (Bin-wise)
+% 7. EM CLUSTERING
 %% ========================================================================
-Pf = cluster_em_frequency_bins(z, params.num_sources, params.max_iter_em, params.tol_em);
+
+% Perform EM clustering independently across frequency bins to estimate
+% probabilistic source masks.
+Pf = cluster_em_frequency_bins( ...
+    z, ...
+    params.num_sources, ...
+    params.max_iter_em, ...
+    params.tol_em);
 
 %% ========================================================================
-% 9. PERMUTATION ALIGNMENT
+% 8. PERMUTATION ALIGNMENT
 %% ========================================================================
-Pf = align_permutation(Pf, params.max_iter_perm, params.tol_perm);
+
+% Resolve the frequency-dependent permutation ambiguity between clusters.
+Pf = align_permutation( ...
+    Pf, ...
+    params.max_iter_perm, ...
+    params.tol_perm);
 
 %% ========================================================================
-% 10. SOURCE RECONSTRUCTION (both microphones, exact original logic)
+% 9. SOURCE RECONSTRUCTION
 %% ========================================================================
+
 fprintf('\nReconstructing source spatial images...\n');
+
+% Reconstruct the spatial images of the estimated sources at both
+% microphone channels.
 [Y_tf_mic1, Y_tf_mic2] = reconstruct_sources(X_tf, Pf, params);
 
-% ISTFT to time domain
+% Convert the estimated source images back to the time domain using ISTFT.
 y_mic1 = zeros(params.num_sources, params.signal_length);
 y_mic2 = zeros(params.num_sources, params.signal_length);
+
 for j = 1:params.num_sources
-    y_mic1(j, :) = compute_istft(Y_tf_mic1{j}, window, params.overlap, params.signal_length, params.nfft);
-    y_mic2(j, :) = compute_istft(Y_tf_mic2{j}, window, params.overlap, params.signal_length, params.nfft);
+
+    y_mic1(j, :) = compute_istft( ...
+        Y_tf_mic1{j}, ...
+        window, ...
+        params.overlap, ...
+        params.signal_length, ...
+        params.nfft);
+
+    y_mic2(j, :) = compute_istft( ...
+        Y_tf_mic2{j}, ...
+        window, ...
+        params.overlap, ...
+        params.signal_length, ...
+        params.nfft);
+
 end
 
-% Normalize (as original)
+% Normalize the reconstructed source images independently for each
+% microphone channel.
 y_mic1_norm = zeros(params.num_sources, params.signal_length);
 y_mic2_norm = zeros(params.num_sources, params.signal_length);
+
 for j = 1:params.num_sources
+
     y_mic1_norm(j, :) = y_mic1(j, :) / norm(y_mic1(j, :));
     y_mic2_norm(j, :) = y_mic2(j, :) / norm(y_mic2(j, :));
+
 end
 
 %% ========================================================================
-% 11. EVALUATION (BSSeval)
+% 10. SAVE RESULTS
 %% ========================================================================
-fprintf('\nEvaluating separation performance...\n');
 
-% True spatial images
-s_img = zeros(params.num_sources, params.signal_length, params.num_mics);
+fprintf('\nSaving separated signals...\n');
+
 for j = 1:params.num_sources
-    for i = 1:params.num_mics
-        s_img(j, :, i) = fftfilt(b{i,j}, sources(:, j));
-        s_img(j, :, i) = s_img(j, :, i) / norm(s_img(j, :, i));
-    end
-end
 
-% Estimated spatial images (exact original ordering)
-se_img = zeros(params.num_sources, params.signal_length, params.num_mics);
-for j = 1:params.num_sources
-    se_img(j, :, 1) = y_mic1_norm(j, :); % mic 1
-    se_img(j, :, 2) = y_mic2_norm(j, :); % mic 2
-end
+    audiowrite( ...
+        sprintf('separated_source_%d_mic1.wav', j), ...
+        y_mic1(j, :)', ...
+        FS);
 
-if exist('bss_eval_images', 'file')
-    [SDR, ISR, SIR, SAR, perm] = evaluate_separation(se_img, s_img);
-else
-    fprintf('BSSeval toolbox not found. Skipping evaluation.\n');
-    fprintf('Install from: https://bass-db.gforge.inria.fr/bss_eval/\n');
-end
+    audiowrite( ...
+        sprintf('separated_source_%d_mic2.wav', j), ...
+        y_mic2(j, :)', ...
+        FS);
 
-%% ========================================================================
-% 12. SAVE RESULTS
-%% ========================================================================
-% fprintf('\nSaving separated signals...\n');
-% for j = 1:params.num_sources
-%     audiowrite(sprintf('separated_source_%d_mic1.wav', j), y_mic1(j, :)', FS);
-%     audiowrite(sprintf('separated_source_%d_mic2.wav', j), y_mic2(j, :)', FS);
-% end
+end
 
 fprintf('\nDone.\n');
