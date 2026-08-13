@@ -1,0 +1,28 @@
+.gitignore MATLAB file
+
+# MATLAB
+*.m~
+*.asv
+*.mat
+*.fig
+
+# Audio files (optional - uncomment if you don't want to commit large audio files)
+# *.wav
+# *.mp3
+
+# Results
+results/
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
