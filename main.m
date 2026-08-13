@@ -13,8 +13,9 @@
 %   Date: 2024
 
 clear; clc; close all;
-addpath(genpath('./src'))
-addpath(genpath('./utils'))
+addpath(genpath('/home/mostafa/Mostafa/sawada/CTFMR version finale/src'))
+addpath(genpath('/home/mostafa/Mostafa/sawada/CTFMR version finale/utils'))
+addpath(genpath('/home/mostafa/Mostafa/sawada'))
 
 %% ========================================================================
 % 1. PARAMETERS (exactly as original)
@@ -66,59 +67,81 @@ else
     error('Only N=2 or N=3 are supported in this demo.');
 end
 
+% 
+% % Reference vectors for complex cosine similarity (optional)
+% % If empty, M orthogonal complex vectors are generated automatically.
+% Ref(:,1)=[3 ;
+%    1 ];
+% 
+% Ref(:,2)=[1;
+%   -3];
+% params.reference_vectors = Ref;
+
 %% ========================================================================
 % 2. LOAD AUDIO AND MIXING FILTERS
 %% ========================================================================
 % NOTE: Adapt the file paths below to your local dataset.
+%
+% Example for N=2 sources:
+%   [s1, FS] = audioread('male_s4.wav');
+%   [s2, FS] = audioread('female_s5.wav');
+%   a = load('filters/2src_50ms_1m_1m_config2.mat');
+%
+% Example for N=3 sources:
+%   [s1, FS] = audioread('s2.wav');
+%   [s2, FS] = audioread('s4.wav');
+%   [s3, FS] = audioread('male_s2.wav');
+%   a = load('filters/3src_100ms_1m_1m_config2.mat');
 
-fprintf('Loading audio signals...\n');
+fprintf('Loading audio signals and mixing filters...\n');
 
 % -------------------------------------------------------------------------
 % USER CONFIGURATION: replace with your actual file paths
 % -------------------------------------------------------------------------
 if params.num_sources == 2
-    % Determined case: load mixed microphone signals
-    [mix1, FS] = audioread('./data/sample_audio/deter_mix_mic1.wav');
-    [mix2, FS] = audioread('./data/sample_audio/deter_mix_mic2.wav');
-    
-    mix1 = mix1(1:min(params.signal_length, length(mix1)));
-    mix2 = mix2(1:min(params.signal_length, length(mix2)));
-    
-    % Pad if necessary
-    if length(mix1) < params.signal_length
-        mix1 = [mix1; zeros(params.signal_length - length(mix1), 1)];
-    end
-    if length(mix2) < params.signal_length
-        mix2 = [mix2; zeros(params.signal_length - length(mix2), 1)];
-    end
-    
-    x = [mix1, mix2];  % M x signal_length
-    
+    [s1, FS] = audioread('/home/mostafa/Mostafa/sawada/male_s4.wav');
+    [s2, FS] = audioread('/home/mostafa/Mostafa/sawada/female_s5.wav');
+    s1 = s1(1:params.signal_length);
+    s2 = s2(1:params.signal_length);
+    sources = [s1, s2];
+
+    a = load('/home/mostafa/Mostafa/sawada/filters/2src_50ms_1m_1m_config2.mat');
 elseif params.num_sources == 3
-    % Underdetermined case: load mixed microphone signals
-    [mix1, FS] = audioread('./data/sample_audio/under_mix_mic1.wav');
-    [mix2, FS] = audioread('./data/sample_audio/under_mix_mic2.wav');
-    
-    mix1 = mix1(1:min(params.signal_length, length(mix1)));
-    mix2 = mix2(1:min(params.signal_length, length(mix2)));
-    
-    % Pad if necessary
-    if length(mix1) < params.signal_length
-        mix1 = [mix1; zeros(params.signal_length - length(mix1), 1)];
-    end
-    if length(mix2) < params.signal_length
-        mix2 = [mix2; zeros(params.signal_length - length(mix2), 1)];
-    end
-    
-    x = [mix1, mix2];  % M x signal_length
+    [s1, FS] = audioread('s2.wav');
+    [s2, FS] = audioread('s4.wav');
+    [s3, FS] = audioread('male_s2.wav');
+    s1 = s1(1:params.signal_length);
+    s2 = s2(1:params.signal_length);
+    s3 = s3(1:params.signal_length);
+    sources = [s1, s2, s3];
+
+    a = load('/home/mostafa/Mostafa/sawada/filters/3src_100ms_1m_1m_config2.mat');
 else
     error('This demo supports N=2 or N=3 sources. Please adapt main.m for other cases.');
 end
 
-fprintf('Audio loaded: %d samples, %d kHz sampling rate\n', params.signal_length, FS/1000);
+% Extract mixing filters
+A = a.A; % M x N x filter_length
+b = cell(params.num_mics, params.num_sources);
+for i = 1:params.num_mics
+    for j = 1:params.num_sources
+        b{i,j} = squeeze(A(i,j,:));
+    end
+end
 
 %% ========================================================================
-% 3. STFT ANALYSIS (positive frequencies only)
+% 3. GENERATE CONVOLUTIVE MIXTURES
+%% ========================================================================
+fprintf('Generating convolutive mixtures...\n');
+x = zeros(params.signal_length, params.num_mics);
+for i = 1:params.num_mics
+    for j = 1:params.num_sources
+        x(:, i) = x(:, i) + fftfilt(b{i,j}, sources(:, j));
+    end
+end
+
+%% ========================================================================
+% 5. STFT ANALYSIS (positive frequencies only)
 %% ========================================================================
 fprintf('Computing one-sided STFT...\n');
 window = hanning(params.window_size);
@@ -140,29 +163,29 @@ end
 fprintf('  STFT size: %d mics x %d frames x %d bins\n', params.num_mics, T, F);
 
 %% ========================================================================
-% 4. FEATURE EXTRACTION (Complex Cosine Similarity)
+% 6. FEATURE EXTRACTION (Complex Cosine Similarity)
 %% ========================================================================
 fprintf('Extracting complex cosine similarity features...\n');
 theta = extract_complex_cosine_features(X_tf, H_ref);
 
 %% ========================================================================
-% 5. WHITENING AND NORMALIZATION
+% 7. WHITENING AND NORMALIZATION
 %% ========================================================================
 fprintf('Whitening features...\n');
 z = whiten_features(theta);
 
 %% ========================================================================
-% 6. EM CLUSTERING (Bin-wise)
+% 8. EM CLUSTERING (Bin-wise)
 %% ========================================================================
 Pf = cluster_em_frequency_bins(z, params.num_sources, params.max_iter_em, params.tol_em);
 
 %% ========================================================================
-% 7. PERMUTATION ALIGNMENT
+% 9. PERMUTATION ALIGNMENT
 %% ========================================================================
 Pf = align_permutation(Pf, params.max_iter_perm, params.tol_perm);
 
 %% ========================================================================
-% 8. SOURCE RECONSTRUCTION (both microphones, exact original logic)
+% 10. SOURCE RECONSTRUCTION (both microphones, exact original logic)
 %% ========================================================================
 fprintf('\nReconstructing source spatial images...\n');
 [Y_tf_mic1, Y_tf_mic2] = reconstruct_sources(X_tf, Pf, params);
@@ -184,18 +207,40 @@ for j = 1:params.num_sources
 end
 
 %% ========================================================================
-% 9. SAVE RESULTS
+% 11. EVALUATION (BSSeval)
 %% ========================================================================
-fprintf('\nSaving separated signals...\n');
-output_dir = './results';
-if ~exist(output_dir, 'dir')
-    mkdir(output_dir);
-end
+fprintf('\nEvaluating separation performance...\n');
 
+% True spatial images
+s_img = zeros(params.num_sources, params.signal_length, params.num_mics);
 for j = 1:params.num_sources
-    audiowrite(sprintf('%s/separated_source_%d_mic1.wav', output_dir, j), y_mic1(j, :)', FS);
-    audiowrite(sprintf('%s/separated_source_%d_mic2.wav', output_dir, j), y_mic2(j, :)', FS);
-    fprintf('  Saved: separated_source_%d_mic1.wav, separated_source_%d_mic2.wav\n', j, j);
+    for i = 1:params.num_mics
+        s_img(j, :, i) = fftfilt(b{i,j}, sources(:, j));
+        s_img(j, :, i) = s_img(j, :, i) / norm(s_img(j, :, i));
+    end
 end
 
-fprintf('\nDone! Separated signals saved to ''%s/'' directory.\n', output_dir);
+% Estimated spatial images (exact original ordering)
+se_img = zeros(params.num_sources, params.signal_length, params.num_mics);
+for j = 1:params.num_sources
+    se_img(j, :, 1) = y_mic1_norm(j, :); % mic 1
+    se_img(j, :, 2) = y_mic2_norm(j, :); % mic 2
+end
+
+if exist('bss_eval_images', 'file')
+    [SDR, ISR, SIR, SAR, perm] = evaluate_separation(se_img, s_img);
+else
+    fprintf('BSSeval toolbox not found. Skipping evaluation.\n');
+    fprintf('Install from: https://bass-db.gforge.inria.fr/bss_eval/\n');
+end
+
+%% ========================================================================
+% 12. SAVE RESULTS
+%% ========================================================================
+% fprintf('\nSaving separated signals...\n');
+% for j = 1:params.num_sources
+%     audiowrite(sprintf('separated_source_%d_mic1.wav', j), y_mic1(j, :)', FS);
+%     audiowrite(sprintf('separated_source_%d_mic2.wav', j), y_mic2(j, :)', FS);
+% end
+
+fprintf('\nDone.\n');
