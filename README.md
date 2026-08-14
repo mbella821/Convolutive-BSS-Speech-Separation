@@ -20,12 +20,12 @@ BSS_RTF_Recombination/
 ├── src/
 │   ├── compute_stft.m                  % STFT analysis
 │   ├── compute_istft.m                 % ISTFT synthesis
-│   ├── extract_complex_cosine_features.m % Feature extraction (Eq. Ang)
+│   ├── extract_complex_cosine_features.m % Feature extraction 
 │   ├── whiten_features.m               % Whitening & normalization
 │   ├── cluster_em_frequency_bins.m     % Bin-wise EM clustering
 │   ├── align_permutation.m             % Global + local permutation alignment
-│   ├── estimate_rtf.m                  % Blind RTF estimation (Eq. FiltresSep3)
-│   ├── reconstruct_sources.m           % RTF-based recombination (det & under-det)
+│   ├── estimate_rtf.m                  % Blind RTF estimation 
+│   ├── reconstruct_sources.m           % RTF-based recombination 
 │   └── evaluate_separation.m           % BSS evaluation wrapper
 └── utils/
     ├── expectation.m                   % EM Expectation step
