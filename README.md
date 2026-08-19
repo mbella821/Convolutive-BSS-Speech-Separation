@@ -42,7 +42,7 @@ BSS_RTF_Recombination/
 
 ## Usage
 
-1. Place your audio files and mixing filters in the working directory.
+1. Place your audio files in the working directory.
 2. Open `main.m` and adjust the parameters (number of sources `N`, microphones `M`, file paths, etc.).
 3. Run `main.m`.
 
